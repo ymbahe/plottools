@@ -67,11 +67,12 @@ class PlotFractionAboveThreshold:
     """Running fractions above a given threshold."""
 
     def __init__(self, x, y, threshold, nbins=10, npart=None, xrange=None,
-                 logbins=False, 
+                 logbins=False, min_width=None, 
                  plot=True, plot_actual=True, uncertainty=True,
-                 mode='above', alpha_error=0.2, ci=0.68, **kwargs):
+                 mode='above', alpha_error=0.2, ci=0.68, min_count=5,
+                 offset=0.0, **kwargs):
         n_boot = 100
-
+        
         if xrange is None:
             xmin, xmax = np.min(x), np.max(x)
         else:
@@ -81,10 +82,32 @@ class PlotFractionAboveThreshold:
             ind_in_range = np.nonzero((x >= xmin) & (x < xmax))[0]
             ntot = len(ind_in_range)
             nbins = int(np.floor(ntot / npart))
+            np_targ = int(ntot / nbins)
             if nbins < 5: nbins = 5
             separators = np.linspace(0, ntot, nbins+1, dtype=int)
             sorter = np.argsort(x[ind_in_range])
 
+            if min_width is not None:
+                separators = [0]
+                bin_start = xrange[0]
+                nbins = 0
+                curr_offset = 0
+                while(True):
+                    trial_end = min(curr_offset + np_targ, ntot-1)
+                    x_part = x[ind_in_range[sorter[trial_end]]]
+                    if x_part - bin_start > min_width:
+                        curr_offset += trial_end
+                        separators.append(curr_offset)
+                        bin_start = x_part
+                    else:
+                        curr_offset = np.searchsorted(
+                            x[ind_in_range[sorter]], bin_start + min_width)
+                        separators.append(curr_offset)
+                        bin_start = x[ind_in_range[sorter[curr_offset]]]
+                    if separators[-1] >= ntot:
+                        break
+                nbins = len(separators) - 1
+                separators = np.clip(separators, 0, ntot-1)
         else:
             if logbins:
                 binedges = np.logspace(np.log10(xmin), np.log10(xmax),
@@ -101,7 +124,8 @@ class PlotFractionAboveThreshold:
         for ibin in range(nbins):
             
             if npart is not None:
-                ind_bin = ind_in_range[sorter[np.arange(separators[ibin], separators[ibin+1])]]
+                ind_bin = ind_in_range[sorter[np.arange(separators[ibin],
+                                                        separators[ibin+1])]]
             else:
                 ind_bin = np.nonzero((x >= binedges[ibin]) &
                                      (x < binedges[ibin+1]))[0]
@@ -135,14 +159,16 @@ class PlotFractionAboveThreshold:
 
         # Plot the result, if desired
         if plot:        
-            ind_plot = np.nonzero(self.n > 5)[0]    
+            ind_plot = np.nonzero(self.n > min_count)[0]    
            
             if plot_actual:
-                plt.plot(self.x[ind_plot], self.f_succ[ind_plot],
+                plt.plot(self.x[ind_plot],
+                         self.f_succ[ind_plot] + offset,
                          marker='o', markersize=1, **kwargs)
                 
             if uncertainty:            
                 plt.fill_between(
-                    self.x[ind_plot], self.p_lower[ind_plot],
-                    self.p_upper[ind_plot], alpha=alpha_error, **kwargs)
+                    self.x[ind_plot], self.p_lower[ind_plot] + offset,
+                    self.p_upper[ind_plot] + offset, alpha=alpha_error,
+                    **kwargs)
                 
